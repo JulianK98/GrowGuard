@@ -14,20 +14,23 @@ def get_data(client: InfluxDBClient) -> dict:
 
     query = f"""
     from(bucket: "{BUCKET}")
-    |> range(start: today())
+    |> range(start: -100000h)
     |> filter(fn: (r) => r._measurement == "irrigation")
-    |> filter(fn: (r) => r._field == "irrigation-done")
+    |> filter(fn: (r) => r._field == "start-irrigation")
     |> last()
     """
+
     
     tables = query_api.query(query, org=ORG)
+
+    last_values = {}
+    if tables != []:    
+        last_values.update({"time":tables[0].records[0].get_time()})
+        for table in tables:
+            for record in table.records:
+                last_values.update({record.get_field():record.get_value()})
     
-    last_values = {"time":tables[0].records[0].get_time()}
-    for table in tables:
-        for record in table.records:
-            last_values.update({record.get_field():record.get_value()})
-    
-    return last_values["time"]
+    return last_values
 
 def write_data(client) -> None:
     write_api = client.write_api(write_options=SYNCHRONOUS)
@@ -39,11 +42,36 @@ def write_data(client) -> None:
     
     write_api.write(bucket=BUCKET, org=ORG, record=point)
         
+
+def get_irrigation_count(client: InfluxDBClient) -> int:
+    query_api = client.query_api()
+
+    query = f"""
+    from(bucket: "{BUCKET}")
+    |> range(start: today())
+    |> filter(fn: (r) => r._measurement == "irrigation")
+    |> filter(fn: (r) => r._field == "irrigation-done")
+    |> count()
+    """
+    
+    tables = query_api.query(query, org=ORG)
+
+    if tables != []:
+        count = tables[0].records[0].get_value()
+    else:
+        count = 0
+        
+    return tables
+    
+    
+    
+    
 if __name__ == "__main__":
     influxdb_client = InfluxDBClient(url=URL, token=TOKEN, org=ORG)
     
     
     data = get_data(influxdb_client)
-    print(data.strftime("%H:%M"))
+    # print(data.strftime("%H:%M"))
+    print(data)
     
     
