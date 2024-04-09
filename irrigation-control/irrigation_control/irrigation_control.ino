@@ -10,12 +10,13 @@ const char* wifi_ssid =  "FRITZ!Powerline 540E";
 const char* wifi_password = "29007651062585801210";
 const char* wifi_ssid_2 =  "FRITZ!Box 7590 ME";
 const char* wifi_password_2 = "16076165919985523842";
-
+const char* wifi_ssid_3 =  "WLAN-896992";
+const char* wifi_password_3 = "0257775673539147";
 
 // InfluxDB settings
-#define INFLUXDB_URL "http://192.168.2.140:8086"
-#define INFLUXDB_TOKEN "KDq3XStui1lHMXVc44jrWxPNebKXwcd1GiqiGsZ4S3W8QGcN6eGRR4a9S_4V7_ZloPnLwq54nTXxZsJ5RGto4Q=="
-#define INFLUXDB_ORG "bcd6cfd2cb5b7d92"
+#define INFLUXDB_URL "http://192.168.2.201:8086"
+#define INFLUXDB_TOKEN "Cx2TXXjjacOmDC-HxRUh7Hf-FT6RjhdLW3inWwMDSTfHqsBima9HE-1GC8agKyaa07LWXJpoX0pogGBoGhuaQQ=="
+#define INFLUXDB_ORG "199d6cf6fc399db4"
 #define INFLUXDB_BUCKET "growguard"
 #define TZ_INFO "UTC2"
 InfluxDBClient client(INFLUXDB_URL, INFLUXDB_ORG, INFLUXDB_BUCKET, INFLUXDB_TOKEN);
@@ -35,8 +36,10 @@ DHT dht(DHTPIN, DHTTYPE);
 // Intervall settings
 unsigned long previous_irrigation_ts = 0;
 unsigned long previous_sensor_ts = 0;
-unsigned long irrigation_intervall = 1000;
-unsigned long sensor_intervall = 10000;
+unsigned long irrigation_intervall = 1000; // in ms
+unsigned long sensor_intervall = 10000; // in ms
+unsigned long irrigation_pulse_length; // in ms
+bool irrigation_active = false;
 
 // Declare functions
 bool get_start_irrigation_flag();
@@ -60,6 +63,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   wifiMulti.addAP(wifi_ssid, wifi_password);
   wifiMulti.addAP(wifi_ssid_2, wifi_password_2);
+  wifiMulti.addAP(wifi_ssid_3, wifi_password_3);
   Serial.print("Connecting to wifi");
   while (wifiMulti.run() != WL_CONNECTED) {
     Serial.print(".");
@@ -85,6 +89,7 @@ void setup() {
 void loop() {
   unsigned long current_ts = millis();
 
+  // Measure and report data
   if (current_ts - previous_sensor_ts >= sensor_intervall) {
     previous_sensor_ts = current_ts;
 
@@ -103,30 +108,39 @@ void loop() {
     }
   }
 
-  // Irrigation
-  if (current_ts - previous_irrigation_ts >= irrigation_intervall) {
-    previous_irrigation_ts = current_ts;
+  // Start irrigation
+  if (irrigation_active==false) {
+    if (current_ts - previous_irrigation_ts >= irrigation_intervall) {
+      previous_irrigation_ts = current_ts;
 
-    if (get_start_irrigation_flag()) {
-      int pulse_length = get_pulse_length();
-      set_start_irrigation_flag();
+      if (get_start_irrigation_flag()) {
+        irrigation_pulse_length = get_pulse_length() * 1000;
+        set_start_irrigation_flag();
 
-      // Control water pump
-      digitalWrite(WATER_PUMP_PIN, HIGH); 
-      delay(pulse_length*1000);
-      digitalWrite(WATER_PUMP_PIN, LOW);
-
-      report_irrigation(pulse_length); 
+        // Control water pump
+        digitalWrite(WATER_PUMP_PIN, HIGH); 
+        irrigation_active = true;
+        Serial.println("Water pump activated");
+      }
     }
   }
 
+  // End irrigation
+  if (irrigation_active==true) {
+    if (current_ts - previous_irrigation_ts >= irrigation_pulse_length) {
+      digitalWrite(WATER_PUMP_PIN, LOW);
+      Serial.println("Water pump deactivated");
+
+      report_irrigation(irrigation_pulse_length/1000); 
+      irrigation_active = false;
+    }
+  }
 
   // Check WiFi connection and reconnect if needed
   if (wifiMulti.run() != WL_CONNECTED) {
     Serial.println("Wifi connection lost");
+    delay(1000);
   }
-
-  delay(10);
 }
 
 
@@ -140,8 +154,14 @@ bool get_start_irrigation_flag() {
   FluxQueryResult result = client.query(query);
   
   result.next();
-  bool si_flag = result.getValueByName("_value").getBool();
 
+  bool si_flag;
+  if (!result.getValueByName("_value").isNull()) {
+    si_flag = result.getValueByName("_value").getBool();
+  } else {
+    si_flag = false;
+  }
+  
   if (result.getError() != "") {
     Serial.print("Query result error: ");
     Serial.println(result.getError());
