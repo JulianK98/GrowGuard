@@ -6,10 +6,10 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 # InfluxDB
 TOKEN = "SWMjXUZ1cooTaJASEU8Tiqv4pc6zFJMsXoGO05q46O-5cR1gn4VS7ZnlEK7eELFfc2EwNcRps7A-hbkvoN3XlQ=="
 ORG = "GrowGuard"
-URL = "http://192.168.2.140:8086"
+URL = "http://192.168.2.201:8086"
 BUCKET = "growguard"
 INFLUXDB_CLIENT = InfluxDBClient(url=URL, token=TOKEN, org=ORG)
-DASHBOARD_URL = "http://192.168.2.140:8086/orgs/bcd6cfd2cb5b7d92/dashboards/0ccafde577c80000?lower=now%28%29+-+1h"
+DASHBOARD_URL = "http://192.168.2.201:8086/orgs/199d6cf6fc399db4/dashboards/0cdc691f04fbc000?lower=now%28%29+-+30d"
 
 
 

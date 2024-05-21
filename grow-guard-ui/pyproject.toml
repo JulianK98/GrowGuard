@@ -11,6 +11,8 @@ python = "^3.10"
 streamlit = "^1.32.2"
 influxdb-client = "^1.41.0"
 pandas = "^2.2.1"
+black = "^24.3.0"
+argparse = "^1.4.0"
 
 
 [build-system]

@@ -1,210 +1,72 @@
+import os
+import sys
 import streamlit as st
-import pandas as pd
 from datetime import datetime, timedelta
 from time import sleep
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 
+from db_communication import DBCom
+
+# Check if UI should be started in dev mode
+if len(sys.argv) >= 2:
+    if sys.argv[1] == "dev":
+        DEV = True
+    else:
+        DEV = False
+else:
+    DEV = False
+    
+
 # InfluxDB
-TOKEN = "Cx2TXXjjacOmDC-HxRUh7Hf-FT6RjhdLW3inWwMDSTfHqsBima9HE-1GC8agKyaa07LWXJpoX0pogGBoGhuaQQ=="
 ORG = "GrowGuard"
-# URL = "http://192.168.2.140:8086"
-URL = "http://192.168.2.201:8086"
 BUCKET = "growguard"
-# DASHBOARD_URL = "http://192.168.2.140:8086/orgs/bcd6cfd2cb5b7d92/dashboards/0ccafde577c80000?lower=now%28%29+-+1h"
-DASHBOARD_URL = "http://192.168.2.201:8086/orgs/199d6cf6fc399db4/dashboards/0cdc691f04fbc000?lower=now%28%29+-+1h"
-INFLUXDB_CLIENT = InfluxDBClient(url=URL, token=TOKEN, org=ORG)
+if DEV:
+    TOKEN = "ONRceIkyGlQs6jSymPUaFQT8yvViUtxCINTv9cHrrb7fdUP0FjJMbz5Tb3O4kl9NT06VjiS2zImcM0-5bevxGg=="
+    URL = "http://192.168.2.140:8086"    
+else:
+    TOKEN = "GVaqO3_LMrj-6_-tHNGDP3eIXQj5yR85B4IfSFEQZoVhB923C09Ys70VorDIVKAxogWQ-loHFNmIEnzrFog0Yw=="
+    URL = "http://192.168.2.201:8086"
+
+DB_COM = DBCom(URL, TOKEN, ORG, BUCKET)
+
 
 # Irrigation process data
 PUMP_POWER = 9.5  # ml/s
 
 
-def load_sensors_data(client: InfluxDBClient) -> dict:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: -1h)
-    |> filter(fn: (r) => r._measurement == "sensors")
-    |> last()
-    """
-
-    tables = query_api.query(query, org="GrowGuard")
-
-    if tables != []:
-        latest_values = {"time": tables[0].records[0].get_time()}
-        for table in tables:
-            for record in table.records:
-                latest_values.update({record.get_field(): record.get_value()})
-    else:
-        latest_values = {
-            "time": "--",
-            "temperature": "-- ",
-            "air-humidity": "-- ",
-            "air-pressure": "-- ",
-            "soil-humidity": "-- ",
-        }
-
-    return latest_values
-
-
-def get_irrigation_count(client: InfluxDBClient) -> int:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: today())
-    |> filter(fn: (r) => r._measurement == "irrigation")
-    |> filter(fn: (r) => r._field == "irrigation-done")
-    |> count()
-    """
-
-    tables = query_api.query(query, org=ORG)
-
-    if tables != []:
-        count = tables[0].records[0].get_value()
-    else:
-        count = 0
-
-    return count
-
-
-def get_last_irrigation_time(client: InfluxDBClient) -> datetime | None:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: today())
-    |> filter(fn: (r) => r._measurement == "irrigation")
-    |> filter(fn: (r) => r._field == "irrigation-done")
-    |> last()
-    """
-
-    tables = query_api.query(query, org=ORG)
-
-    if tables != []:
-        time = tables[0].records[0].get_time()
-    else:
-        time = None
-
-    return time
-
-
-def get_irrigation_time_today(client: InfluxDBClient) -> int:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: today())
-    |> filter(fn: (r) => r._measurement == "irrigation")
-    |> filter(fn: (r) => r._field == "irrigation-done")
-    |> sum()
-    """
-
-    tables = query_api.query(query, org=ORG)
-
-    if tables != []:
-        irr_time = tables[0].records[0].get_value()
-    else:
-        irr_time = 0
-
-    return irr_time
-
-
-def load_settings_data(client: InfluxDBClient) -> dict:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: -100000h)
-    |> filter(fn: (r) => r._measurement == "settings")
-    |> last()
-    """
-
-    tables = query_api.query(query, org="GrowGuard")
-
-    settings_values = {"time": tables[0].records[0].get_time()}
-    for table in tables:
-        for record in table.records:
-            settings_values.update({record.get_field(): record.get_value()})
-
-    return settings_values
-
-
-def get_pulse_length(client: InfluxDBClient) -> int:
-    query_api = client.query_api()
-
-    query = f"""
-    from(bucket: "{BUCKET}")
-    |> range(start: -100000h)
-    |> filter(fn: (r) => r._measurement == "irrigation")
-    |> filter(fn: (r) => r._field == "pulse-length")
-    |> last()
-    """
-
-    tables = query_api.query(query, org=ORG)
-
-    if tables != []:
-        pulse_length = tables[0].records[0].get_value()
-    else:
-        pulse_length = 0
-
-    return pulse_length
-
-
-def write_settings_data(client: InfluxDBClient, param: str, value) -> None:
-    write_api = client.write_api(write_options=SYNCHRONOUS)
-
-    point = Point("settings").field(param, value)
-
-    write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-
-def send_irrigation_signal(client: InfluxDBClient) -> None:
-    write_api = client.write_api(write_options=SYNCHRONOUS)
-
-    point = Point("irrigation").field("start-irrigation", True)
-
-    write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-
-def write_pulse_length(client: InfluxDBClient, pulse_length: int) -> None:
-    write_api = client.write_api(write_options=SYNCHRONOUS)
-
-    point = Point("irrigation").field("pulse-length", pulse_length)
-
-    write_api.write(bucket=BUCKET, org=ORG, record=point)
-
-
 def measurement_intervall_change():
-    write_settings_data(INFLUXDB_CLIENT, "measurement-intervall", st.session_state.meas)
+    DB_COM.write_settings_data("measurement-intervall", st.session_state.meas)
 
 
 def auto_irrigation_change():
-    write_settings_data(INFLUXDB_CLIENT, "auto-irrigation", st.session_state.auto)
+    DB_COM.write_settings_data("auto-irrigation", st.session_state.auto)
 
 
 def on_man_irr_click():
-    send_irrigation_signal(INFLUXDB_CLIENT)
+    DB_COM.send_irrigation_signal()
 
 
 def pulse_length_change():
-    write_pulse_length(INFLUXDB_CLIENT, st.session_state.pl)
+    DB_COM.write_pulse_length(st.session_state.pl)
 
 
-if __name__ == "__main__":
-
+def main():
     # General settings
     st.set_page_config(page_title="Grow Guard", page_icon="🌵")
     st.title("Grow Guard - Smart Irrigation")
 
+    if DEV:
+        st.header("Dev Mode - using local InfluxDB instance")
+    
     # Load data from InfluxDB
-    latest_data = load_sensors_data(INFLUXDB_CLIENT)
-    settings_data = load_settings_data(INFLUXDB_CLIENT)
-    irrigation_count = get_irrigation_count(INFLUXDB_CLIENT)
-    last_irrigation_time = get_last_irrigation_time(INFLUXDB_CLIENT)
-    water_consumption_today = get_irrigation_time_today(INFLUXDB_CLIENT) * PUMP_POWER
-    prev_pulse_length = get_pulse_length(INFLUXDB_CLIENT)
+    latest_data = DB_COM.load_sensors_data()
+    settings_data = DB_COM.load_settings_data()
+    irrigation_count = DB_COM.get_irrigation_count()
+    last_irrigation_time = DB_COM.get_last_irrigation_time()
+    water_consumption_today = DB_COM.get_irrigation_time_today() * PUMP_POWER
+    prev_pulse_length = DB_COM.get_pulse_length()
+    auto_mode_settings = DB_COM.get_auto_mode_settings()
 
     # Irrigation container
     with st.container(border=True):
@@ -255,14 +117,14 @@ if __name__ == "__main__":
     with st.container(border=True):
         st.subheader("Sensors")
 
-        meas_interval_options = [1, 5, 10, 30]
-        measurement_intervall = st.selectbox(
-            "Measurement Intervall [s]",
-            meas_interval_options,
-            index=meas_interval_options.index(settings_data["measurement-intervall"]),
-            key="meas",
-            on_change=measurement_intervall_change,
-        )
+        # meas_interval_options = [1, 5, 10, 30]
+        # measurement_intervall = st.selectbox(
+        #     "Measurement Intervall [s]",
+        #     meas_interval_options,
+        #     index=meas_interval_options.index(settings_data["measurement-intervall"]),
+        #     key="meas",
+        #     on_change=measurement_intervall_change,
+        # )
 
         col1, col2 = st.columns(2)
 
@@ -278,3 +140,39 @@ if __name__ == "__main__":
 
         soil_hum_value = latest_data["soil-humidity"]
         soil_hum_metric = col2.metric("Soil Humidity", f"{soil_hum_value}%")
+
+    # Irrigation - Auto Mode settings
+    with st.form(key='auto_mode_settings'):
+        st.subheader("Irrigation - Auto Mode Settings")
+        
+        col1, col2 = st.columns(2)
+        
+        pulse_length_auto = col1.slider(
+            "Pulse Length [s]:",
+            1,
+            20,
+            auto_mode_settings["pulse-length"]
+        )
+        last_irr_limit = col1.slider(
+            "Last Irrigation Limit [h]:",
+            0.25,
+            10.0,
+            auto_mode_settings["last-irr-limit"],
+            step=0.25
+        )
+        soil_hum_limit = col2.slider(
+            "Soil Humidity Limit [%]:",
+            0,
+            100,
+            auto_mode_settings["soil-hum-limit"]
+        )
+        
+        submit = col1.form_submit_button(label='Update Settings')
+        
+        if submit:
+            DB_COM.update_auto_mode_settings(last_irr_limit, soil_hum_limit, pulse_length_auto)    
+
+
+if __name__ == "__main__":
+    main()
+    
