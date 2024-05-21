@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "irrigation-auto-mode"
+version = "0.1.0"
+description = ""
+authors = ["Julian Kalhammer <julian.kalhammer@tum.de>"]
+readme = "README.md"
+packages = [{include = "irrigation_auto_mode"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+influxdb-client = "^1.41.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
